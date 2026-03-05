@@ -1,31 +1,37 @@
 # Multi-stage Dockerfile to build Kairos image with kubeadm provider using kairos-init
 
+ARG UBUNTU_VERSION=24.04
+
 # Build arguments
-ARG BASE_IMAGE=quay.io/kairos/fedora:40-core-amd64-generic-v3.5.1
+# TARGETARCH is automatically provided by buildx (amd64, arm64, etc.)
+ARG TARGETARCH
 # IMPORTANT: This version must match the kubernetesVersion in your configuration files
 # (e.g., kairos-master-minimal.yaml, kairos-worker-minimal.yaml)
-ARG KUBEADM_VERSION=latest
-ARG CRICTL_VERSION=1.25.0
-ARG RELEASE_VERSION=0.4.0 # Update newer? e.g. https://github.com/kubernetes/release/releases/tag/v0.18.0
+ARG KUBEADM_VERSION=v1.34.3
+ARG CRICTL_VERSION=1.34.0
+ARG RELEASE_VERSION=0.12.0 # Update newer? e.g. https://github.com/kubernetes/release/releases/tag/v0.18.0
 ARG FIPS_ENABLED=false
-ARG KAIROS_INIT_VERSION=v0.6.0
-ARG VERSION=latest
+ARG KAIROS_INIT_VERSION=v0.7.0
+ARG VERSION=v4.8.0
 
 # Stage 1: Get kairos-init binary
 FROM quay.io/kairos/kairos-init:${KAIROS_INIT_VERSION} AS kairos-init
 
 # Stage 2: Build the provider binary
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
+ARG TARGETARCH
+ARG TARGETOS=linux
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION
 ENV GO_LDFLAGS="-X github.com/kairos-io/kairos/provider-kubeadm/version.Version=${VERSION} -w -s"
-RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags "${GO_LDFLAGS}" -o agent-provider-kubeadm main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -ldflags "${GO_LDFLAGS}" -o agent-provider-kubeadm main.go
 
 # Stage 3: Download Kubernetes binaries
 FROM alpine:latest AS k8s-binaries
+ARG TARGETARCH
 ARG KUBEADM_VERSION
 ARG CRICTL_VERSION
 ARG FIPS_ENABLED=false
@@ -51,9 +57,9 @@ RUN if [ "$KUBEADM_VERSION" = "latest" ]; then \
 
 # Download crictl
 RUN if [ "$FIPS_ENABLED" = "true" ]; then \
-        curl -L "https://storage.googleapis.com/spectro-fips/cri-tools/v${CRICTL_VERSION}/cri-tools-${CRICTL_VERSION}-linux-amd64.tar.gz" | tar -xz; \
+        curl -L "https://storage.googleapis.com/spectro-fips/cri-tools/v${CRICTL_VERSION}/cri-tools-${CRICTL_VERSION}-linux-${TARGETARCH}.tar.gz" | tar -xz; \
     else \
-        curl -L "https://github.com/kubernetes-sigs/cri-tools/releases/download/v${CRICTL_VERSION}/crictl-v${CRICTL_VERSION}-linux-amd64.tar.gz" | tar -xz; \
+        curl -L "https://github.com/kubernetes-sigs/cri-tools/releases/download/v${CRICTL_VERSION}/crictl-v${CRICTL_VERSION}-linux-${TARGETARCH}.tar.gz" | tar -xz; \
     fi
 
 # Download kubeadm, kubelet, kubectl
@@ -63,9 +69,9 @@ RUN K8S_VERSION=$(cat /tmp/k8s_version) && \
         curl -L -o kubelet "https://storage.googleapis.com/spectro-fips/${K8S_VERSION}/kubelet" && \
         curl -L -o kubectl "https://storage.googleapis.com/spectro-fips/${K8S_VERSION}/kubectl"; \
     else \
-        curl -L -o kubeadm "https://dl.k8s.io/${K8S_VERSION}/bin/linux/amd64/kubeadm" && \
-        curl -L -o kubelet "https://dl.k8s.io/${K8S_VERSION}/bin/linux/amd64/kubelet" && \
-        curl -L -o kubectl "https://dl.k8s.io/${K8S_VERSION}/bin/linux/amd64/kubectl"; \
+        curl -L -o kubeadm "https://dl.k8s.io/${K8S_VERSION}/bin/linux/${TARGETARCH}/kubeadm" && \
+        curl -L -o kubelet "https://dl.k8s.io/${K8S_VERSION}/bin/linux/${TARGETARCH}/kubelet" && \
+        curl -L -o kubectl "https://dl.k8s.io/${K8S_VERSION}/bin/linux/${TARGETARCH}/kubectl"; \
     fi
 
 RUN chmod +x kubeadm kubelet kubectl crictl
@@ -75,6 +81,7 @@ RUN cp /tmp/k8s_version /binaries/k8s_version
 
 # Stage 4: Download containerd and CNI plugins
 FROM alpine:latest AS containerd-binaries
+ARG TARGETARCH
 ARG FIPS_ENABLED=false
 
 RUN apk add --no-cache curl
@@ -83,16 +90,16 @@ WORKDIR /containerd
 
 # Download containerd
 RUN if [ "$FIPS_ENABLED" = "true" ]; then \
-        curl -sSL "https://storage.googleapis.com/spectro-fips/containerd/v1.6.4/containerd-1.6.4-linux-amd64.tar.gz" | tar -xz; \
+        curl -sSL "https://storage.googleapis.com/spectro-fips/containerd/v1.6.4/containerd-1.6.4-linux-${TARGETARCH}.tar.gz" | tar -xz; \
     else \
-        curl -sSL "https://github.com/containerd/containerd/releases/download/v2.1.4/containerd-2.1.4-linux-amd64.tar.gz" | tar -xz; \
+        curl -sSL "https://github.com/containerd/containerd/releases/download/v2.1.6/containerd-2.1.6-linux-${TARGETARCH}.tar.gz" | tar -xz; \
     fi
 
 # Download runc
 RUN if [ "$FIPS_ENABLED" = "true" ]; then \
         curl -SL -o runc "https://storage.googleapis.com/spectro-fips/runc-1.1.4/runc"; \
     else \
-        curl -SL -o runc "https://github.com/opencontainers/runc/releases/download/v1.3.0/runc.amd64"; \
+        curl -SL -o runc "https://github.com/opencontainers/runc/releases/download/v1.3.4/runc.${TARGETARCH}"; \
     fi
 
 RUN chmod +x runc
@@ -100,17 +107,25 @@ RUN chmod +x runc
 # Download CNI plugins
 RUN mkdir -p cni-plugins && \
     if [ "$FIPS_ENABLED" = "true" ]; then \
-        curl -sSL "https://storage.googleapis.com/spectro-fips/cni-plugins/v1.1.1/cni-plugins-1.1.1-linux-amd64.tar.gz" | tar -C cni-plugins -xz; \
+        curl -sSL "https://storage.googleapis.com/spectro-fips/cni-plugins/v1.1.1/cni-plugins-1.1.1-linux-${TARGETARCH}.tar.gz" | tar -C cni-plugins -xz; \
     else \
-        curl -sSL "https://github.com/containernetworking/plugins/releases/download/v1.8.0/cni-plugins-linux-amd64-v1.8.0.tgz" | tar -C cni-plugins -xz; \
+        curl -sSL "https://github.com/containernetworking/plugins/releases/download/v1.8.0/cni-plugins-linux-${TARGETARCH}-v1.8.0.tgz" | tar -C cni-plugins -xz; \
     fi
 
 # Stage 5: Main image
-FROM ${BASE_IMAGE}
+# Construct the base image name using TARGETARCH
+FROM ubuntu:${UBUNTU_VERSION}
 ARG KUBEADM_VERSION
 ARG RELEASE_VERSION
 ARG VERSION
 ARG FIPS_ENABLED=false
+ARG TARGETARCH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    tar && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy kairos-init (but don't run it yet)
 COPY --from=kairos-init /kairos-init /kairos-init
@@ -157,7 +172,8 @@ RUN if [ "$FIPS_ENABLED" != "true" ]; then \
     fi
 
 # Setup kernel modules
-RUN echo "overlay" >> /etc/modules-load.d/k8s.conf && \
+RUN mkdir -p /etc/modules-load.d && \
+    echo "overlay" >> /etc/modules-load.d/k8s.conf && \
     echo "br_netfilter" >> /etc/modules-load.d/k8s.conf
 
 # Setup networking parameters
@@ -166,9 +182,10 @@ RUN echo "net.bridge.bridge-nf-call-iptables=1" >> /etc/sysctl.d/k8s.conf && \
     echo "net.ipv4.ip_forward=1" >> /etc/sysctl.d/k8s.conf
 
 # Set OS identification environment variables
-ARG BASE_IMAGE
 ARG IMAGE_REPOSITORY=quay.io/kairos
-RUN BASE_IMAGE_NAME=$(echo ${BASE_IMAGE} | grep -o '[^/]*:' | rev | cut -c2- | rev) && \
+ARG UBUNTU_VERSION=24.04
+RUN BASE_IMAGE="ubuntu:${UBUNTU_VERSION}" && \
+    BASE_IMAGE_NAME=$(echo ${BASE_IMAGE} | grep -o '[^/]*:' | rev | cut -c2- | rev) && \
     BASE_IMAGE_TAG=$(echo ${BASE_IMAGE} | grep -o ':.*' | cut -c2-) && \
     KUBEADM_VERSION_TAG=$(echo ${KUBEADM_VERSION} | sed 's/+/-/') && \
     echo "OS_ID=${BASE_IMAGE_NAME}-kubeadm" >> /etc/os-release && \
@@ -185,6 +202,8 @@ RUN BASE_IMAGE_NAME=$(echo ${BASE_IMAGE} | grep -o '[^/]*:' | rev | cut -c2- | r
 RUN mkdir -p /etc/dracut.conf.d && \
     echo 'omit_dracutmodules+=" iscsi iscsiroot "' > /etc/dracut.conf.d/no-iscsi.conf
 
+ARG MODEL="generic"
+
 # Now run kairos-init at the very end after all setup is complete
 # This ensures all binaries and configurations are available for initramfs creation
 # Use the resolved K8s version or generate a proper semver if VERSION is "latest"
@@ -194,7 +213,7 @@ RUN KAIROS_VERSION="${VERSION}" && \
         KAIROS_VERSION="v1.0.0-${K8S_VERSION}"; \
     fi && \
     echo "Running kairos-init with version: ${KAIROS_VERSION}" && \
-    /kairos-init -l info -m generic --version "${KAIROS_VERSION}"
+    /kairos-init -l info -m ${MODEL} --version "${KAIROS_VERSION}"
 
 RUN /kairos-init validate;
 

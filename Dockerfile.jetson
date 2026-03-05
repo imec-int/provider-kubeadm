@@ -1,0 +1,17 @@
+ARG IMAGE
+FROM ${IMAGE}
+
+RUN mkdir -p /opt/nvidia/l4t-packages && \
+    touch /opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall
+
+# Disable ISCSI
+# (The kernel does not support it: https://github.com/kairos-io/kairos/issues/2467)
+RUN echo 'omit_dracutmodules+=" iscsi "' > /etc/dracut.conf.d/iscsi.conf
+
+RUN apt-key adv --fetch-key http://repo.download.nvidia.com/jetson/jetson-ota-public.asc && \
+    echo "deb https://repo.download.nvidia.com/jetson/common r36.5 main" | sudo tee -a /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
+    echo "deb https://repo.download.nvidia.com/jetson/t234 r36.5 main" | sudo tee -a /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
+    apt-get update && apt-get install -y \
+    nvidia-cudnn=6.2.2+b24 nvidia-jetpack-runtime && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
