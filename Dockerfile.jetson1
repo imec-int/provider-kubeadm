@@ -1,0 +1,27 @@
+ARG IMAGE
+FROM ${IMAGE}
+
+ARG NVIDIA_CONTAINER_TOOLKIT_VERSION=1.18.2-1
+
+# Install nvidia container to be able to talk to GPU
+# Clean up all NVIDIA Jetson repo entries before adding new ones
+RUN rm -f /etc/apt/sources.list.d/nvidia-l4t-apt-source.list /etc/apt/sources.list.d/nvidia-container-toolkit.list && \
+    mkdir -p /usr/share/keyrings && \
+    rm -f /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg /usr/share/keyrings/jetson-ota.gpg && \
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey -o /tmp/nvidia-container-toolkit.gpg && \
+    gpg --batch --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg /tmp/nvidia-container-toolkit.gpg && \
+    curl -fsSL http://repo.download.nvidia.com/jetson/jetson-ota-public.asc -o /tmp/jetson-ota.gpg && \
+    gpg --batch --dearmor -o /usr/share/keyrings/jetson-ota.gpg /tmp/jetson-ota.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/jetson-ota.gpg] https://repo.download.nvidia.com/jetson/common r36.4 main" > /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
+    echo "deb [signed-by=/usr/share/keyrings/jetson-ota.gpg] https://repo.download.nvidia.com/jetson/t234 r36.4 main" >> /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
+    curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+      sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+      tee /etc/apt/sources.list.d/nvidia-container-toolkit.list && \
+    apt-get update && \
+    apt-get install -y \
+      nvidia-container-toolkit=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+      nvidia-container-toolkit-base=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+      libnvidia-container-tools=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+      libnvidia-container1=${NVIDIA_CONTAINER_TOOLKIT_VERSION} && \
+      nvidia-ctk runtime configure --runtime=containerd && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
