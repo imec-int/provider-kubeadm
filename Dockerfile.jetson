@@ -3,7 +3,7 @@ FROM ${IMAGE}
 
 RUN mkdir -p /opt/nvidia/l4t-packages && \
     touch /opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall
-
+ 
 # Disable ISCSI
 # (The kernel does not support it: https://github.com/kairos-io/kairos/issues/2467)
 RUN echo 'omit_dracutmodules+=" iscsi "' > /etc/dracut.conf.d/iscsi.conf
@@ -11,7 +11,85 @@ RUN echo 'omit_dracutmodules+=" iscsi "' > /etc/dracut.conf.d/iscsi.conf
 RUN apt-key adv --fetch-key http://repo.download.nvidia.com/jetson/jetson-ota-public.asc && \
     echo "deb https://repo.download.nvidia.com/jetson/common r36.5 main" | sudo tee -a /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
     echo "deb https://repo.download.nvidia.com/jetson/t234 r36.5 main" | sudo tee -a /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
-    apt-get update && apt-get install -y \
-    nvidia-cudnn=6.2.2+b24 nvidia-jetpack-runtime && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get update && apt-get install -y --no-install-recommends \
+    nvidia-cudnn=6.2.2+b24 \
+    nvidia-jetpack-runtime && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* 
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        nvidia-l4t-kernel \
+        nvidia-l4t-kernel-oot-modules \
+        nvidia-l4t-display-kernel \
+        nvidia-l4t-firmware\
+        nvidia-l4t-bootloader  \
+        nvidia-l4t-configs \
+        nvidia-l4t-tools && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Prefer the tegra kernel when both generic and tegra are present.
+# TODO -> at the moment the kernel is present, but it is using the generic one instead
+# kairos@jetson-nano:/$ sudo modprobe nvgpu
+  #modprobe: FATAL: Module nvgpu not found in directory /lib/modules/6.8.0-101-generic
+  #kairos@jetson-nano:/$ ls /lib/modules
+  #5.15.185-tegra  6.8.0-101-generic
+  #kairos@jetson-nano:/$ uname -r
+  #6.8.0-101-generic
+  #kairos@jetson-nano:/$ ls /lib/modules | head -n1
+  #5.15.185-tegra
+  #kairos@jetson-nano:/$ ls /boot/vmlinuz-* | head -n1
+  #/boot/vmlinuz-6.8.0-101-generic
+  #kairos@jetson-nano:/$ ls /boot/vmlinuz-*
+  #/boot/vmlinuz-6.8.0-101-generic
+
+# Nvidia kernel is just called image so we need to link properly
+# kairos@jetson-nano:~$ ls -la /boot/
+  #total 142932
+  #drwxr-xr-x  3 root root     4096 Mar  6 13:47 .
+  #drwxr-xr-x 22 root root     4096 Mar  6 15:31 ..
+  #-rw-r--r--  1 root root 43637248 Jan 16 03:42 Image
+  #-rw-------  1 root root  6668778 Feb 11 11:37 System.map-6.8.0-101-generic
+  #-rw-r--r--  1 root root   337239 Feb 11 11:37 config-6.8.0-101-generic
+  #drwxr-xr-x  2 root root     4096 Feb 24 13:44 grub
+  #-rw-------  1 root root 77112504 Feb 24 13:46 initrd
+  #lrwxrwxrwx  1 root root       31 Feb 24 13:45 vmlinuz -> /boot/vmlinuz-6.8.0-101-generic
+  #-rw-------  1 root root 18410654 Feb 11 11:38 vmlinuz-6.8.0-101-generic
+
+# kairos uses vmlinuz so we symlink to the image, which is the L4T kernel
+RUN ln -sf /boot/Image /boot/vmlinuz
+ 
+
+RUN depmod 5.15.185-tegra
+
+
+# setup container to use the nvidia runtime by default
+RUN nvidia-ctk runtime configure --runtime=containerd
+# create the cdi file (csv because some strange mapping issues otherwise)
+# TODO -> I think this needs to run on the device, so in startup script
+RUN nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml --mode=csv 
+# we need to link runc to /usr/bin for the nvidia runtime to work, as it is hardcoded to look for it there
+# I think kairos, or the operator puts this in another location
+RUN ln -sf /opt/bin/runc /usr/bin/runc
+
+# Move CUDA out of the way to /opt so kairos can occupy /usr/local without workarounds 
+RUN update-alternatives --remove-all cuda && \
+    update-alternatives --remove-all cuda-12 && \
+    mv /usr/local/cuda-12.6 /opt/cuda-12.6 && \
+    update-alternatives --install /opt/cuda cuda /opt/cuda-12.6 1 && \
+    update-alternatives --install /opt/cuda-12 cuda-12 /opt/cuda-12.6 1
+
+
+# FOR TESTING PURPOSES ONLY, NOT FOR PRODUCTION
+# with nerdclt we can quikcly test containerd locally e.g. with `sudo nerdctl run --rm --device nvidia.com/gpu=all  nvcr.io/nvidia/k8s/cuda-sample:devicequery`
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    wget \
+    tar && \
+    mkdir -p /opt/bin && \
+    wget -q https://github.com/containerd/nerdctl/releases/download/v2.2.1/nerdctl-2.2.1-linux-arm64.tar.gz && \
+    tar -xzf nerdctl-2.2.1-linux-arm64.tar.gz -C /opt/bin nerdctl && \
+    chmod +x /opt/bin/nerdctl && \
+    ln -sf /opt/bin/nerdctl /usr/bin/nerdctl && \
+    rm -f nerdctl-2.2.1-linux-arm64.tar.gz && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+
