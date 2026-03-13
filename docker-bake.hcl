@@ -59,6 +59,6 @@ target "provider-kubeadm-22-04-nvidia-minimal" {
     IMAGE = "edgelabacr.azurecr.io/kairos/provider-kubeadm:22.04-0.3.0"
   }
   output = [
-    "type=image,name=edgelabacr.azurecr.io/kairos/provider-kubeadm:22.04-0.3.15-agx-orin-minimal,push=true,compression=zstd,compression-level=17,force-compression=true"
+    "type=image,name=edgelabacr.azurecr.io/kairos/provider-kubeadm:22.04-0.4.0-agx-orin-minimal,push=true,compression=zstd,compression-level=17,force-compression=true"
   ]
 }
