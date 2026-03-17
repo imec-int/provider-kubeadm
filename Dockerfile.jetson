@@ -1,4 +1,4 @@
-ARG IMAGE
+ARG IMAGE=base
 FROM ${IMAGE}
 
 RUN mkdir -p /opt/nvidia/l4t-packages && \

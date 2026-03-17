@@ -12,7 +12,7 @@ ARG CRICTL_VERSION=1.34.0
 ARG RELEASE_VERSION=0.12.0 # Update newer? e.g. https://github.com/kubernetes/release/releases/tag/v0.18.0
 ARG FIPS_ENABLED=false
 ARG KAIROS_INIT_VERSION=v0.7.0
-ARG VERSION=v4.8.0
+ARG VERSION=v4.8.1
 
 # Stage 1: Get kairos-init binary
 FROM quay.io/kairos/kairos-init:${KAIROS_INIT_VERSION} AS kairos-init
@@ -124,6 +124,8 @@ ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    parted \
+    fdisk \
     tar && \
     rm -rf /var/lib/apt/lists/*
 
