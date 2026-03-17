@@ -3,7 +3,7 @@ variable "BASE_VERSION" {
 }
 
 group "default" {
-  targets = ["provider-kubeadm-22-04","provider-kubeadm-22-04-nvidia-minimal"]
+  targets = ["provider-kubeadm-22-04","provider-kubeadm-24-04","provider-kubeadm-22-04-nvidia-minimal"]
 }
 
 target "provider-kubeadm-24-04" {
