@@ -2,68 +2,52 @@ ARG IMAGE=base
 FROM ${IMAGE}
 
 RUN mkdir -p /opt/nvidia/l4t-packages && \
-    touch /opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall
+  touch /opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall
 
 # Disable ISCSI
 # (The kernel does not support it: https://github.com/kairos-io/kairos/issues/2467)
 RUN echo 'omit_dracutmodules+=" iscsi "' > /etc/dracut.conf.d/iscsi.conf
 
 RUN apt-key adv --fetch-key http://repo.download.nvidia.com/jetson/jetson-ota-public.asc && \
-    echo "deb https://repo.download.nvidia.com/jetson/common r36.5 main" | sudo tee -a /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
-    echo "deb https://repo.download.nvidia.com/jetson/t234 r36.5 main" | sudo tee -a /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    nvidia-cudnn=6.2.2+b24 \
-    nvidia-jetpack-runtime \
-    # The kernel and display packages are needed for the nvidia runtime to work, as it relies on the nvidia modules being present in the kernel, and the display package includes the nvidia-uvm module which is also required
-    nvidia-l4t-kernel \
-    nvidia-l4t-kernel-oot-modules \
-    nvidia-l4t-display-kernel \
-    nvidia-l4t-firmware\
-    nvidia-l4t-bootloader  \
-    nvidia-l4t-configs \
-    nvidia-l4t-tools && \
-    apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    # Move CUDA out of the way to /opt so kairos can occupy /usr/local without workarounds
-    update-alternatives --remove-all cuda && \
-    update-alternatives --remove-all cuda-12 && \
-    mv /usr/local/cuda-12.6 /opt/cuda-12.6 && \
-    update-alternatives --install /opt/cuda cuda /opt/cuda-12.6 1 && \
-    update-alternatives --install /opt/cuda-12 cuda-12 /opt/cuda-12.6 1
+  echo "deb https://repo.download.nvidia.com/jetson/common r36.5 main" | sudo tee -a /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
+  echo "deb https://repo.download.nvidia.com/jetson/t234 r36.5 main" | sudo tee -a /etc/apt/sources.list.d/nvidia-l4t-apt-source.list && \
+  apt-get update && apt-get install -y --no-install-recommends \
+  nvidia-cudnn=6.2.2+b24 \
+  nvidia-jetpack-runtime \
+  # The kernel and display packages are needed for the nvidia runtime to work, as it relies on the nvidia modules being present in the kernel, and the display package includes the nvidia-uvm module which is also required
+  nvidia-l4t-kernel \
+  nvidia-l4t-kernel-oot-modules \
+  nvidia-l4t-display-kernel \
+  nvidia-l4t-firmware \
+  nvidia-l4t-bootloader \
+  nvidia-l4t-configs \
+  nvidia-l4t-tools && \
+  apt-get clean && rm -rf /var/lib/apt/lists/* && \
+  # Move CUDA out of the way to /opt so kairos can occupy /usr/local without workarounds
+  update-alternatives --remove-all cuda && \
+  update-alternatives --remove-all cuda-12 && \
+  mv /usr/local/cuda-12.6 /opt/cuda-12.6 && \
+  update-alternatives --install /opt/cuda cuda /opt/cuda-12.6 1 && \
+  update-alternatives --install /opt/cuda-12 cuda-12 /opt/cuda-12.6 1
 
-# Prefer the tegra kernel when both generic and tegra are present.
-# TODO -> at the moment the kernel is present, but it is using the generic one instead
-# kairos@jetson-nano:/$ sudo modprobe nvgpu
-  #modprobe: FATAL: Module nvgpu not found in directory /lib/modules/6.8.0-101-generic
-  #kairos@jetson-nano:/$ ls /lib/modules
-  #5.15.185-tegra  6.8.0-101-generic
-  #kairos@jetson-nano:/$ uname -r
-  #6.8.0-101-generic
-  #kairos@jetson-nano:/$ ls /lib/modules | head -n1
-  #5.15.185-tegra
-  #kairos@jetson-nano:/$ ls /boot/vmlinuz-* | head -n1
-  #/boot/vmlinuz-6.8.0-101-generic
-  #kairos@jetson-nano:/$ ls /boot/vmlinuz-*
-  #/boot/vmlinuz-6.8.0-101-generic
+# Detect tegra kernel version and set up symlinks for kairos to use
+RUN TEGRA_VER=$(ls /lib/modules 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-tegra' | sort -V | tail -n1) && \
+  if [ -z "$TEGRA_VER" ]; then \
+  echo "ERROR: tegra kernel not found in /lib/modules" && exit 1; \
+  fi && \
+  echo "Found tegra kernel version: $TEGRA_VER" && \
+  ln -sf /boot/Image "/boot/vmlinuz-${TEGRA_VER}" && \
+  ln -sf /boot/Image /boot/vmlinuz && \
+  echo "$TEGRA_VER" > /tmp/tegra_version.txt && \
+  depmod "$TEGRA_VER"
 
-# Nvidia kernel is just called image so we need to link properly
-# kairos@jetson-nano:~$ ls -la /boot/
-  #total 142932
-  #drwxr-xr-x  3 root root     4096 Mar  6 13:47 .
-  #drwxr-xr-x 22 root root     4096 Mar  6 15:31 ..
-  #-rw-r--r--  1 root root 43637248 Jan 16 03:42 Image
-  #-rw-------  1 root root  6668778 Feb 11 11:37 System.map-6.8.0-101-generic
-  #-rw-r--r--  1 root root   337239 Feb 11 11:37 config-6.8.0-101-generic
-  #drwxr-xr-x  2 root root     4096 Feb 24 13:44 grub
-  #-rw-------  1 root root 77112504 Feb 24 13:46 initrd
-  #lrwxrwxrwx  1 root root       31 Feb 24 13:45 vmlinuz -> /boot/vmlinuz-6.8.0-101-generic
-  #-rw-------  1 root root 18410654 Feb 11 11:38 vmlinuz-6.8.0-101-generic
-
-# kairos uses vmlinuz so we symlink to the image, which is the L4T kernel
-RUN ln -sf /boot/Image /boot/vmlinuz
-
-
-RUN depmod 5.15.185-tegra
-
+# Force initrd rebuild for the tegra kernel, writing to /boot/initrd which is the
+# path the bootloader (GRUB/kairos) actually loads. Without the explicit output path,
+# dracut writes to /boot/initramfs-<version>.img which is never loaded.
+RUN TEGRA_VER=$(cat /tmp/tegra_version.txt) && \
+  dracut -f /boot/initrd --kver "$TEGRA_VER" && \
+  echo "Rebuilt /boot/initrd for kernel $TEGRA_VER" && \
+  lsinitrd /boot/initrd | grep -E 'nvme|blkid|by-label|persistent-storage' || true
 
 # setup container to use the nvidia runtime by default
 RUN nvidia-ctk runtime configure --runtime=containerd --cdi.enable

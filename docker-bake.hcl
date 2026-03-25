@@ -1,9 +1,9 @@
 variable "BASE_VERSION" {
-  default = "0.5.0"
+  default = "0.6.0"
 }
 
 group "default" {
-  targets = ["provider-kubeadm-22-04","provider-kubeadm-24-04","provider-kubeadm-22-04-nvidia"]
+  targets = ["provider-kubeadm-22-04-nvidia-jetson", "provider-kubeadm-22-04"]
 }
 
 target "provider-kubeadm-24-04" {
@@ -30,7 +30,7 @@ target "provider-kubeadm-22-04" {
   ]
 }
 
-target "provider-kubeadm-22-04-nvidia" {
+target "provider-kubeadm-22-04-nvidia-jetson" {
   context = "."
   dockerfile = "Dockerfile.jetson"
   platforms = ["linux/arm64"]
@@ -38,6 +38,6 @@ target "provider-kubeadm-22-04-nvidia" {
     base = "target:provider-kubeadm-22-04"
   }
   output = [
-    "type=image,name=edgelabacr.azurecr.io/kairos/provider-kubeadm:22.04-${BASE_VERSION}-nvidia,push=true,compression=zstd,compression-level=17,force-compression=true"
+    "type=image,name=edgelabacr.azurecr.io/kairos/provider-kubeadm:22.04-${BASE_VERSION}-nvidia-jetson,push=true,compression=zstd,compression-level=17,force-compression=true"
   ]
 }
